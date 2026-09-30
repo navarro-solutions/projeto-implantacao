@@ -36,30 +36,46 @@ export function ehConcluida(i: Implantacao) {
 export interface ResumoImplantacao {
   imp: Implantacao;
   cliente: string;
+  /** Quanto se podia gastar (soma da aba Provisionado; se vazia, a coluna da aba Implantacoes). */
+  provisionado: number;
+  provPorCategoria: Record<string, number>;
   custo: number;
   pago: number;
   aVencer: number;
   vencido: number;
   porCategoria: Record<string, number>;
+  /** provisionado − gasto. Em andamento = quanto ainda pode gastar; concluída = economia (negativo = estouro). */
+  saldo: number;
+  concluida: boolean;
+  /** Só concluídas: provisionado − gasto (pode ser negativa). */
+  economia: number;
   econNegociacao: number;
   econEstoque: number;
+  /** economia − negociação − estoque: o que sobrou (ou estourou) na execução. */
   econExecucao: number;
-  economia: number;
-  /** custo − orçado (negativo = abaixo do orçado) */
-  desvio: number;
 }
 
 /**
- * Regra da economia (evita contar duas vezes):
- * negociação e reaproveitamento são lançados na aba Economias;
- * "execução abaixo do orçado" é só o que sobra da diferença orçado − custo depois deles,
- * e só conta para implantações concluídas.
+ * Regra da economia: do quanto eu podia gastar (provisionado) para o quanto eu gastei.
+ * Só conta quando a implantação está concluída — antes disso o saldo ainda pode ser gasto.
+ * Negociação e reaproveitamento de estoque (aba Economias) explicam parte dessa economia;
+ * o restante é a execução.
  */
 export function resumir(base: Base, hoje: string): ResumoImplantacao[] {
   const nomeCliente = new Map(base.clientes.map((c) => [c.id, c.nome]));
   return base.implantacoes.map((imp) => {
     const lans = base.lancamentos.filter((l) => l.idImplantacao === imp.id);
     const ecos = base.economias.filter((e) => e.idImplantacao === imp.id);
+    const provs = base.provisoes.filter((p) => p.idImplantacao === imp.id);
+
+    const provPorCategoria: Record<string, number> = {};
+    for (const p of provs) {
+      const cat = p.categoria || "Sem categoria";
+      provPorCategoria[cat] = (provPorCategoria[cat] ?? 0) + p.valor;
+    }
+    const provisionado = provs.length ? provs.reduce((a, p) => a + p.valor, 0) : imp.provisionadoInformado;
+    if (!provs.length && imp.provisionadoInformado) provPorCategoria["Sem categoria"] = imp.provisionadoInformado;
+
     let pago = 0,
       aVencer = 0,
       vencido = 0;
@@ -73,28 +89,28 @@ export function resumir(base: Base, hoje: string): ResumoImplantacao[] {
       porCategoria[cat] = (porCategoria[cat] ?? 0) + l.valor;
     }
     const custo = pago + aVencer + vencido;
-    const econNegociacao = ecos.filter((e) => norm(e.origem).includes("negoci")).reduce((a, e) => a + e.valor, 0);
-    const econEstoque = ecos.filter((e) => norm(e.origem).includes("estoque")).reduce((a, e) => a + e.valor, 0);
-    const outras = ecos
-      .filter((e) => !norm(e.origem).includes("negoci") && !norm(e.origem).includes("estoque"))
-      .reduce((a, e) => a + e.valor, 0);
-    const econExecucao =
-      ehConcluida(imp) && imp.valorOrcado > 0
-        ? Math.max(0, imp.valorOrcado - custo - econNegociacao - econEstoque - outras)
-        : 0;
+    const saldo = provisionado - custo;
+    const concluida = ehConcluida(imp);
+    const economia = concluida && provisionado > 0 ? saldo : 0;
+    const somaEco = (f: (o: string) => boolean) => ecos.filter((e) => f(norm(e.origem))).reduce((a, e) => a + e.valor, 0);
+    const econEstoque = concluida ? somaEco((o) => o.includes("estoque")) : 0;
+    const econNegociacao = concluida ? somaEco((o) => !o.includes("estoque")) : 0;
     return {
       imp,
       cliente: nomeCliente.get(imp.idCliente) ?? imp.idCliente,
+      provisionado,
+      provPorCategoria,
       custo,
       pago,
       aVencer,
       vencido,
       porCategoria,
-      econNegociacao: econNegociacao + outras,
+      saldo,
+      concluida,
+      economia,
+      econNegociacao,
       econEstoque,
-      econExecucao,
-      economia: econNegociacao + econEstoque + outras + econExecucao,
-      desvio: custo - imp.valorOrcado,
+      econExecucao: concluida && provisionado > 0 ? economia - econNegociacao - econEstoque : 0,
     };
   });
 }

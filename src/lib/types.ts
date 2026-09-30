@@ -34,7 +34,16 @@ export interface Implantacao {
   dataInicio: string | null; // ISO yyyy-mm-dd
   dataConclusao: string | null;
   status: StatusImplantacao;
-  valorOrcado: number;
+  /** Valor provisionado informado direto na aba Implantacoes (usado só se a aba Provisionado não tiver linhas para ela). */
+  provisionadoInformado: number;
+}
+
+/** Quanto se podia gastar numa implantação, opcionalmente por categoria de custo. */
+export interface Provisao {
+  idImplantacao: string;
+  categoria: CategoriaCusto; // vazio = valor total da implantação
+  valor: number;
+  observacao: string;
 }
 
 export interface Lancamento {
@@ -60,6 +69,7 @@ export interface Economia {
 export interface Base {
   clientes: Cliente[];
   implantacoes: Implantacao[];
+  provisoes: Provisao[];
   lancamentos: Lancamento[];
   economias: Economia[];
 }

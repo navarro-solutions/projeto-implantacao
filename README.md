@@ -5,24 +5,23 @@ Lê os dados de uma planilha do Google Sheets e roda na Vercel.
 
 ## O que mostra
 
-- **Custo total, Pago, A vencer, Vencido e Economizado** — com filtros por tipo, cliente, status e ano.
-- **Custo × economia por implantação** — barras lado a lado, com detalhe ao passar o mouse.
-- **De onde veio a economia** — execução abaixo do orçado, negociação na compra, reaproveitamento de estoque.
-- **Custo por categoria** — equipamentos/materiais, mão de obra própria, terceiros, deslocamento/infraestrutura.
-- **Tabela de implantações** (orçado, custo, desvio, economia, em aberto) e **contas em aberto** (vencidas primeiro).
+- **Provisionado, Gasto, Economia, Pago, A vencer e Vencido** — com filtros por tipo, cliente, status e ano.
+- **Provisionado × gasto por implantação** — faixa = quanto podia gastar, barra = quanto gastou, vermelho = estouro.
+- **Provisionado × gasto por categoria** — equipamentos/materiais, mão de obra própria, terceiros, deslocamento/infraestrutura.
+- **De onde veio a economia** — negociação na compra, reaproveitamento de estoque e execução.
+- **Tabela de implantações** (provisionado, gasto, % usado, economia ou saldo, em aberto) e **contas em aberto** (vencidas primeiro).
 
 ### Regras de cálculo
 
 | Indicador | Regra |
 |---|---|
-| Custo | soma dos lançamentos da implantação (pagos + a vencer + vencidos) |
+| Provisionado | soma da aba **Provisionado** da implantação (se não houver linhas, usa a coluna `valor_provisionado` da aba Implantacoes, se existir) |
+| Gasto | soma dos lançamentos da implantação (pagos + a vencer + vencidos) |
 | Situação do lançamento | tem `data_pagamento` → Pago; senão, `vencimento` antes de hoje → Vencido; senão → A vencer |
-| Economia de negociação / estoque | soma da aba **Economias** |
-| Economia de execução | só implantações **concluídas**: `orçado − custo − (negociação + estoque)`, nunca negativa |
-| Desvio | `custo − orçado`, só implantações concluídas |
-
-A economia de execução desconta negociação e estoque para não contar a mesma economia duas vezes
-(um desconto na compra já deixa o custo abaixo do orçado).
+| **Economia** | `provisionado − gasto`, contada quando a implantação está **Concluída** (negativa = estouro) |
+| Saldo disponível | `provisionado − gasto` das implantações ainda não concluídas |
+| Negociação / estoque | soma da aba **Economias** (só concluídas) — explica parte da economia |
+| Execução | `economia − negociação − estoque` (negativa = estourou na execução) |
 
 ## Planilha
 
@@ -32,9 +31,10 @@ depois **Abrir com Planilhas Google**. Abas esperadas (nomes da linha 1 exatamen
 | Aba | Colunas |
 |---|---|
 | `Clientes` | id_cliente, nome, cidade |
-| `Implantacoes` | id_implantacao, id_cliente, tipo, descricao, data_inicio, data_conclusao, status, valor_orcado |
+| `Implantacoes` | id_implantacao, id_cliente, tipo, descricao, data_inicio, data_conclusao, status |
+| `Provisionado` | id_implantacao, categoria, valor_provisionado, observacao — uma linha por implantação (categoria em branco) ou uma por categoria |
 | `Lancamentos` | id_lancamento, id_implantacao, categoria, fornecedor, descricao, valor, vencimento, data_pagamento |
-| `Economias` | id_economia, id_implantacao, origem, descricao, valor, data |
+| `Economias` | id_economia, id_implantacao, origem, descricao, valor, data — opcional |
 
 Valores aceitam `R$ 1.234,56` ou número; datas aceitam `dd/mm/aaaa` ou data do Sheets.
 

@@ -1,12 +1,13 @@
 import { createSign } from "node:crypto";
 import { baseExemplo } from "./exemplo";
-import { campo, linhasParaObjetos, lerCSV, paraDataISO, paraNumero, paraTexto } from "./parse";
-import type { Base, BaseCarregada, Cliente, Economia, Implantacao, Lancamento } from "./types";
+import { campo, linhasParaObjetos, lerCSV, normalizarChave, paraDataISO, paraNumero, paraTexto } from "./parse";
+import type { Base, BaseCarregada, Cliente, Economia, Implantacao, Lancamento, Provisao } from "./types";
 
 /** Nomes das abas na planilha. Podem ser trocados por variáveis de ambiente. */
 export const ABAS = {
   clientes: process.env.ABA_CLIENTES || "Clientes",
   implantacoes: process.env.ABA_IMPLANTACOES || "Implantacoes",
+  provisionado: process.env.ABA_PROVISIONADO || "Provisionado",
   lancamentos: process.env.ABA_LANCAMENTOS || "Lancamentos",
   economias: process.env.ABA_ECONOMIAS || "Economias",
 } as const;
@@ -80,7 +81,13 @@ async function lerAbasAPI(sheetId: string, email: string, chave: string, abas: s
 
 // ---------- Conversão das linhas para o modelo ----------
 
-function montarBase(l: { clientes: Linhas; implantacoes: Linhas; lancamentos: Linhas; economias: Linhas }): Base {
+function montarBase(l: {
+  clientes: Linhas;
+  implantacoes: Linhas;
+  provisionado: Linhas;
+  lancamentos: Linhas;
+  economias: Linhas;
+}): Base {
   const clientes: Cliente[] = linhasParaObjetos(l.clientes)
     .map((o) => ({
       id: paraTexto(campo(o, "id_cliente", "id")),
@@ -98,9 +105,18 @@ function montarBase(l: { clientes: Linhas; implantacoes: Linhas; lancamentos: Li
       dataInicio: paraDataISO(campo(o, "data_inicio", "inicio")),
       dataConclusao: paraDataISO(campo(o, "data_conclusao", "conclusao", "data_fim")),
       status: paraTexto(campo(o, "status")) || "Planejada",
-      valorOrcado: paraNumero(campo(o, "valor_orcado", "orcado", "orcamento")),
+      provisionadoInformado: paraNumero(campo(o, "valor_provisionado", "provisionado", "valor_orcado", "orcado")),
     }))
     .filter((i) => i.id);
+
+  const provisoes: Provisao[] = linhasParaObjetos(l.provisionado)
+    .map((o) => ({
+      idImplantacao: paraTexto(campo(o, "id_implantacao", "implantacao")),
+      categoria: paraTexto(campo(o, "categoria", "tipo_custo")),
+      valor: paraNumero(campo(o, "valor_provisionado", "provisionado", "valor")),
+      observacao: paraTexto(campo(o, "observacao", "obs", "descricao")),
+    }))
+    .filter((x) => x.idImplantacao && x.valor);
 
   const lancamentos: Lancamento[] = linhasParaObjetos(l.lancamentos)
     .map((o, idx) => ({
@@ -126,10 +142,16 @@ function montarBase(l: { clientes: Linhas; implantacoes: Linhas; lancamentos: Li
     }))
     .filter((x) => x.idImplantacao && x.valor);
 
-  return { clientes, implantacoes, lancamentos, economias };
+  return { clientes, implantacoes, provisoes, lancamentos, economias };
 }
 
 // ---------- Ponto de entrada ----------
+
+function temColunas(l: Linhas, ...cols: string[]): boolean {
+  if (!l.length) return false;
+  const cab = new Set(l[0].map((c) => normalizarChave(String(c ?? ""))));
+  return cols.every((c) => cab.has(c));
+}
 
 export async function carregarBase(): Promise<BaseCarregada> {
   const sheetId = process.env.GOOGLE_SHEET_ID?.trim();
@@ -142,19 +164,40 @@ export async function carregarBase(): Promise<BaseCarregada> {
   }
 
   const nomes = [ABAS.clientes, ABAS.implantacoes, ABAS.lancamentos, ABAS.economias];
+  const usaAPI = Boolean(email && chave);
+  const lerUma = (aba: string) =>
+    usaAPI ? lerAbasAPI(sheetId, email!, chave!, [aba]).then((r) => r[0]) : lerAbaPublica(sheetId, aba);
   try {
-    let linhas: Linhas[];
-    let fonte: BaseCarregada["fonte"];
-    if (email && chave) {
-      linhas = await lerAbasAPI(sheetId, email, chave, nomes);
-      fonte = "google-sheets-api";
-    } else {
-      linhas = await Promise.all(nomes.map((n) => lerAbaPublica(sheetId, n)));
-      fonte = "google-sheets-publica";
+    const linhas: Linhas[] = usaAPI
+      ? await lerAbasAPI(sheetId, email!, chave!, nomes)
+      : await Promise.all(nomes.map((n) => lerAbaPublica(sheetId, n)));
+    const fonte: BaseCarregada["fonte"] = usaAPI ? "google-sheets-api" : "google-sheets-publica";
+    const avisos: string[] = [];
+    // A aba Provisionado é lida à parte: se ainda não existir, o painel funciona com o valor da aba Implantacoes.
+    // (Com link público, o Google devolve a 1ª aba quando o nome não existe — por isso confere o cabeçalho.)
+    let provisionado: Linhas = [];
+    try {
+      provisionado = await lerUma(ABAS.provisionado);
+    } catch {
+      provisionado = [];
+    }
+    if (!temColunas(provisionado, "id_implantacao", "valor_provisionado")) {
+      provisionado = [];
+      avisos.push(
+        `Não encontrei a aba "${ABAS.provisionado}" (colunas id_implantacao e valor_provisionado). Enquanto isso, a economia usa a coluna valor_provisionado da aba Implantacoes.`,
+      );
     }
     const [clientes, implantacoes, lancamentos, economias] = linhas;
-    const base = montarBase({ clientes, implantacoes, lancamentos, economias });
-    const avisos: string[] = [];
+    const esperado: [string, Linhas, string][] = [
+      [ABAS.clientes, clientes, "id_cliente"],
+      [ABAS.implantacoes, implantacoes, "id_implantacao"],
+      [ABAS.lancamentos, lancamentos, "id_implantacao"],
+      [ABAS.economias, economias, "id_implantacao"],
+    ];
+    for (const [aba, l, col] of esperado) {
+      if (!temColunas(l, col)) avisos.push(`A aba "${aba}" não tem a coluna ${col} na linha 1 (o nome da aba está certo?).`);
+    }
+    const base = montarBase({ clientes, implantacoes, provisionado, lancamentos, economias });
     if (!base.implantacoes.length) avisos.push(`A aba "${ABAS.implantacoes}" não tem linhas válidas (confira a coluna id_implantacao).`);
     return { ...base, fonte, atualizadoEm, avisos };
   } catch (e) {
@@ -162,6 +205,7 @@ export async function carregarBase(): Promise<BaseCarregada> {
     return {
       clientes: [],
       implantacoes: [],
+      provisoes: [],
       lancamentos: [],
       economias: [],
       fonte: email && chave ? "google-sheets-api" : "google-sheets-publica",

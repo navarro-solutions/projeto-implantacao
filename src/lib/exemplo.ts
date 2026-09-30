@@ -1,4 +1,4 @@
-import type { Base, Economia, Implantacao, Lancamento } from "./types";
+import type { Base, Economia, Implantacao, Lancamento, Provisao } from "./types";
 
 // Dados fictícios para o painel funcionar antes de a planilha ser ligada.
 
@@ -12,6 +12,7 @@ const clientes = [
   { id: "CLI-007", nome: "Edifício Monte Verde", cidade: "São Paulo" },
 ];
 
+const totalProvisionado0: Record<string, number> = {};
 const imp = (
   id: string,
   idCliente: string,
@@ -20,14 +21,17 @@ const imp = (
   dataInicio: string,
   dataConclusao: string | null,
   status: string,
-  valorOrcado: number,
-): Implantacao => ({ id, idCliente, tipo, descricao, dataInicio, dataConclusao, status, valorOrcado });
+  provisionado: number,
+): Implantacao => {
+  totalProvisionado0[id] = provisionado;
+  return { id, idCliente, tipo, descricao, dataInicio, dataConclusao, status, provisionadoInformado: 0 };
+};
 
 const implantacoes: Implantacao[] = [
   imp("IMP-001", "CLI-001", "Portaria remota", "Migração da portaria física para remota", "2026-03-02", "2026-04-10", "Concluída", 48000),
   imp("IMP-002", "CLI-002", "CFTV", "32 câmeras IP + NVR", "2026-03-16", "2026-04-02", "Concluída", 31500),
   imp("IMP-003", "CLI-003", "Controle de acesso", "Facial em 4 acessos + tags veiculares", "2026-04-06", "2026-05-08", "Concluída", 22800),
-  imp("IMP-004", "CLI-004", "Interfonia", "Interfonia IP em 120 unidades", "2026-05-04", "2026-06-12", "Concluída", 27400),
+  imp("IMP-004", "CLI-004", "Interfonia", "Interfonia IP em 120 unidades", "2026-05-04", "2026-06-12", "Concluída", 26800),
   imp("IMP-005", "CLI-005", "CFTV", "Ampliação CFTV — 18 câmeras", "2026-06-01", "2026-06-26", "Concluída", 16900),
   imp("IMP-006", "CLI-006", "Portaria remota", "Portaria remota + clausura", "2026-07-06", "2026-08-21", "Concluída", 52300),
   imp("IMP-007", "CLI-007", "Controle de acesso", "Catracas e leitores QR no hall", "2026-08-03", null, "Em andamento", 35600),
@@ -125,4 +129,20 @@ const economias: Economia[] = [
   eco("IMP-008", "Reaproveitamento de estoque", "Switch PoE do estoque", 950, "2026-09-10"),
 ];
 
-export const baseExemplo: Base = { clientes, implantacoes, lancamentos, economias };
+// Provisionado por categoria: divide o total de cada implantação na proporção típica de custo.
+const divisao: [string, number][] = [
+  ["Equipamentos/materiais", 0.56],
+  ["Mão de obra própria", 0.21],
+  ["Terceiros/empreiteiros", 0.18],
+  ["Deslocamento/infraestrutura", 0.05],
+];
+const provisoes: Provisao[] = Object.entries(totalProvisionado0).flatMap(([idImplantacao, total]) =>
+  divisao.map(([categoria, p]) => ({
+    idImplantacao,
+    categoria,
+    valor: Math.round((total * p) / 100) * 100,
+    observacao: "",
+  })),
+);
+
+export const baseExemplo: Base = { clientes, implantacoes, provisoes, lancamentos, economias };

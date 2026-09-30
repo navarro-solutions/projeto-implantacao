@@ -8,11 +8,11 @@ import {
   brl,
   brlCurto,
   dataBR,
-  ehConcluida,
   hojeSP,
   pct,
   resumir,
   situacao,
+  type ResumoImplantacao,
 } from "@/lib/calculos";
 import { Tooltip, useTooltip, type TooltipLinha } from "./Tooltip";
 
@@ -54,24 +54,31 @@ export default function Painel({ base }: { base: BaseCarregada }) {
   );
 
   const tot = useMemo(() => {
-    const s = (f: (r: (typeof linhas)[number]) => number) => linhas.reduce((a, r) => a + f(r), 0);
-    const concluidas = linhas.filter((r) => ehConcluida(r.imp));
-    const orcadoConcluidas = concluidas.reduce((a, r) => a + r.imp.valorOrcado, 0);
+    const s = (lista: ResumoImplantacao[], f: (r: ResumoImplantacao) => number) => lista.reduce((a, r) => a + f(r), 0);
+    const concl = linhas.filter((r) => r.concluida && r.provisionado > 0);
+    const provConcl = s(concl, (r) => r.provisionado);
+    const categorias = [...new Set([...CATEGORIAS, ...linhas.flatMap((r) => [...Object.keys(r.porCategoria), ...Object.keys(r.provPorCategoria)])])];
     return {
-      custo: s((r) => r.custo),
-      pago: s((r) => r.pago),
-      aVencer: s((r) => r.aVencer),
-      vencido: s((r) => r.vencido),
-      economia: s((r) => r.economia),
-      econExecucao: s((r) => r.econExecucao),
-      econNegociacao: s((r) => r.econNegociacao),
-      econEstoque: s((r) => r.econEstoque),
-      orcado: s((r) => r.imp.valorOrcado),
-      nConcluidas: concluidas.length,
-      econSobreOrcado: orcadoConcluidas
-        ? concluidas.reduce((a, r) => a + r.economia, 0) / orcadoConcluidas
-        : 0,
-      porCategoria: CATEGORIAS.map((c) => ({ rotulo: c, valor: s((r) => r.porCategoria[c] ?? 0) })),
+      provisionado: s(linhas, (r) => r.provisionado),
+      custo: s(linhas, (r) => r.custo),
+      pago: s(linhas, (r) => r.pago),
+      aVencer: s(linhas, (r) => r.aVencer),
+      vencido: s(linhas, (r) => r.vencido),
+      economia: s(concl, (r) => r.economia),
+      econExecucao: s(concl, (r) => r.econExecucao),
+      econNegociacao: s(concl, (r) => r.econNegociacao),
+      econEstoque: s(concl, (r) => r.econEstoque),
+      nConcluidas: concl.length,
+      nEstouro: concl.filter((r) => r.economia < 0).length,
+      econSobreProv: provConcl ? s(concl, (r) => r.economia) / provConcl : 0,
+      saldoAndamento: s(linhas.filter((r) => !r.concluida), (r) => r.saldo),
+      porCategoria: categorias
+        .map((c) => ({
+          rotulo: c,
+          provisionado: s(linhas, (r) => r.provPorCategoria[c] ?? 0),
+          gasto: s(linhas, (r) => r.porCategoria[c] ?? 0),
+        }))
+        .filter((c) => c.provisionado || c.gasto),
     };
   }, [linhas]);
 
@@ -81,7 +88,9 @@ export default function Painel({ base }: { base: BaseCarregada }) {
     .filter((l) => idsFiltrados.has(l.idImplantacao))
     .map((l) => ({ l, s: situacao(l, dia) }))
     .filter((x) => x.s !== "Pago")
-    .sort((a, b) => (a.s === b.s ? (a.l.vencimento ?? "").localeCompare(b.l.vencimento ?? "") : a.s === "Vencido" ? -1 : 1));
+    .sort((a, b) =>
+      a.s === b.s ? (a.l.vencimento ?? "").localeCompare(b.l.vencimento ?? "") : a.s === "Vencido" ? -1 : 1,
+    );
 
   const tooltip = useTooltip();
   const filtrosAtivos = [fTipo, fCliente, fStatus, fAno].some((f) => f !== TODOS);
@@ -91,7 +100,7 @@ export default function Painel({ base }: { base: BaseCarregada }) {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Implantações</h1>
-          <p className="mt-1 text-sm text-ink-2">Quanto cada implantação custou e quanto foi economizado</p>
+          <p className="mt-1 text-sm text-ink-2">Quanto podia gastar, quanto gastou e quanto economizou</p>
         </div>
         <FonteDados base={base} />
       </header>
@@ -133,9 +142,24 @@ export default function Painel({ base }: { base: BaseCarregada }) {
       </section>
 
       {/* KPIs */}
-      <section aria-label="Indicadores" className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi rotulo="Custo total" valor={brl(tot.custo)} nota={`Orçado: ${brl(tot.orcado)}`} />
-        <Kpi rotulo="Pago" valor={brl(tot.pago)} nota={tot.custo ? `${pct(tot.pago / tot.custo)} do custo` : "—"} />
+      <section aria-label="Indicadores" className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi rotulo="Provisionado" valor={brl(tot.provisionado)} nota="Quanto podia gastar" />
+        <Kpi
+          rotulo="Gasto"
+          valor={brl(tot.custo)}
+          nota={tot.provisionado ? `${pct(tot.custo / tot.provisionado)} do provisionado` : "—"}
+        />
+        <Kpi
+          rotulo="Economia"
+          valor={brl(tot.economia)}
+          destaque={tot.economia >= 0 ? "bom" : "ruim"}
+          nota={
+            tot.nConcluidas
+              ? `${pct(tot.econSobreProv)} do provisionado · ${tot.nConcluidas} concluídas${tot.nEstouro ? ` · ${tot.nEstouro} com estouro` : ""}`
+              : "Nenhuma concluída ainda"
+          }
+        />
+        <Kpi rotulo="Pago" valor={brl(tot.pago)} nota={tot.custo ? `${pct(tot.pago / tot.custo)} do gasto` : "—"} />
         <Kpi
           rotulo="A vencer"
           valor={brl(tot.aVencer)}
@@ -144,65 +168,65 @@ export default function Painel({ base }: { base: BaseCarregada }) {
         <Kpi
           rotulo="Vencido"
           valor={brl(tot.vencido)}
-          alerta={tot.vencido > 0}
+          destaque={tot.vencido > 0 ? "ruim" : undefined}
           nota={
-            tot.vencido > 0 ? `${contasAbertas.filter((c) => c.s === "Vencido").length} contas em atraso` : "Nada em atraso"
+            tot.vencido > 0
+              ? `${contasAbertas.filter((c) => c.s === "Vencido").length} contas em atraso`
+              : "Nada em atraso"
           }
-        />
-        <Kpi
-          rotulo="Economizado"
-          valor={brl(tot.economia)}
-          destaque
-          nota={tot.nConcluidas ? `${pct(tot.econSobreOrcado)} do orçado das concluídas` : "Sem implantações concluídas"}
         />
       </section>
 
-      {/* Custo × economia por implantação */}
+      {/* Provisionado × gasto por implantação */}
       <Cartao
-        titulo="Custo × economia por implantação"
-        subtitulo="Ordenado pelo custo. Passe o mouse para ver o detalhe."
+        titulo="Provisionado × gasto por implantação"
+        subtitulo="A faixa clara é o que podia gastar; a barra é o que gastou. Passe o mouse para ver o detalhe."
         className="mt-4"
       >
-        <Legenda
-          itens={[
-            { rotulo: "Custo", cor: "var(--series-1)" },
-            { rotulo: "Economia", cor: "var(--series-2)" },
-          ]}
-        />
-        <BarrasPorImplantacao linhas={linhas} tooltip={tooltip} />
+        <Legenda />
+        <BulletPorImplantacao linhas={linhas} tooltip={tooltip} />
       </Cartao>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Cartao titulo="De onde veio a economia" subtitulo={`Total: ${brl(tot.economia)}`}>
-          <BarrasSimples
-            cor="var(--series-2)"
+        <Cartao
+          titulo="Provisionado × gasto por categoria"
+          subtitulo="Soma das implantações filtradas (inclui as em andamento)"
+        >
+          <BulletPorCategoria itens={tot.porCategoria} tooltip={tooltip} />
+        </Cartao>
+        <Cartao
+          titulo="De onde veio a economia"
+          subtitulo={`Implantações concluídas · economia total ${brl(tot.economia)}`}
+        >
+          <BarrasOrigem
             total={tot.economia}
             tooltip={tooltip}
             itens={[
-              { rotulo: ORIGENS[0], valor: tot.econExecucao, nota: "Só implantações concluídas" },
-              { rotulo: ORIGENS[1], valor: tot.econNegociacao },
-              { rotulo: ORIGENS[2], valor: tot.econEstoque },
+              { rotulo: ORIGENS[1], valor: tot.econNegociacao, nota: "Lançado na aba Economias" },
+              { rotulo: ORIGENS[2], valor: tot.econEstoque, nota: "Lançado na aba Economias" },
+              {
+                rotulo: tot.econExecucao >= 0 ? "Execução abaixo do provisionado" : "Execução acima do provisionado",
+                valor: tot.econExecucao,
+                nota: "Economia total − negociação − estoque",
+              },
             ]}
           />
-        </Cartao>
-        <Cartao titulo="Custo por categoria" subtitulo={`Total: ${brl(tot.custo)}`}>
-          <BarrasSimples cor="var(--series-1)" total={tot.custo} tooltip={tooltip} itens={tot.porCategoria} />
         </Cartao>
       </div>
 
       {/* Tabela de implantações */}
       <Cartao titulo="Implantações" className="mt-4" semPadding>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs text-muted">
                 <Th>Implantação</Th>
                 <Th>Tipo</Th>
                 <Th>Status</Th>
-                <Th direita>Orçado</Th>
-                <Th direita>Custo</Th>
-                <Th direita>Desvio</Th>
-                <Th direita>Economia</Th>
+                <Th direita>Provisionado</Th>
+                <Th direita>Gasto</Th>
+                <Th direita>Usado</Th>
+                <Th direita>Economia / saldo</Th>
                 <Th direita>Em aberto</Th>
               </tr>
             </thead>
@@ -217,19 +241,20 @@ export default function Painel({ base }: { base: BaseCarregada }) {
                   </td>
                   <td className="px-4 py-2.5 text-ink-2">{r.imp.tipo}</td>
                   <td className="px-4 py-2.5 text-ink-2">{r.imp.status}</td>
-                  <Td>{brl(r.imp.valorOrcado)}</Td>
+                  <Td>{r.provisionado ? brl(r.provisionado) : <span className="text-muted">sem provisão</span>}</Td>
                   <Td>{brl(r.custo)}</Td>
                   <Td>
-                    {r.imp.valorOrcado && ehConcluida(r.imp) ? (
-                      <span className={r.desvio > 0 ? "text-critical-text" : "text-ink-2"}>
-                        {r.desvio > 0 ? "▲ " : r.desvio < 0 ? "▼ " : ""}
-                        {brl(Math.abs(r.desvio))}
+                    {r.provisionado ? (
+                      <span className={r.custo > r.provisionado ? "text-critical-text" : "text-ink-2"}>
+                        {pct(r.custo / r.provisionado)}
                       </span>
                     ) : (
                       "—"
                     )}
                   </Td>
-                  <Td>{r.economia ? brl(r.economia) : "—"}</Td>
+                  <Td>
+                    <Saldo r={r} />
+                  </Td>
                   <Td>
                     {r.vencido > 0 ? (
                       <span className="text-critical-text">{brl(r.aVencer + r.vencido)}</span>
@@ -252,8 +277,8 @@ export default function Painel({ base }: { base: BaseCarregada }) {
           </table>
         </div>
         <p className="border-t border-line px-4 py-2.5 text-xs text-muted">
-          Desvio = custo − orçado, só para concluídas (▲ acima do orçado). Economia de execução = o que sobra de orçado − custo depois de
-          descontar negociação e estoque, só para implantações concluídas.
+          Economia = provisionado − gasto, contada quando a implantação é concluída. Nas em andamento, o valor é o saldo
+          que ainda pode ser gasto.
         </p>
       </Cartao>
 
@@ -314,6 +339,8 @@ export default function Painel({ base }: { base: BaseCarregada }) {
 
 // ---------------- Componentes ----------------
 
+type TooltipApi = ReturnType<typeof useTooltip>;
+
 function FonteDados({ base }: { base: BaseCarregada }) {
   const rotulo =
     base.fonte === "exemplo"
@@ -326,7 +353,9 @@ function FonteDados({ base }: { base: BaseCarregada }) {
       <span
         aria-hidden
         className="h-2 w-2 rounded-full"
-        style={{ background: base.avisos.length ? "var(--critical)" : base.fonte === "exemplo" ? "var(--muted)" : "var(--good)" }}
+        style={{
+          background: base.avisos.length ? "var(--critical)" : base.fonte === "exemplo" ? "var(--muted)" : "var(--good)",
+        }}
       />
       {rotulo}
     </span>
@@ -380,30 +409,31 @@ function Kpi({
   rotulo,
   valor,
   nota,
-  alerta,
   destaque,
 }: {
   rotulo: string;
   valor: string;
   nota?: string;
-  alerta?: boolean;
-  destaque?: boolean;
+  destaque?: "bom" | "ruim";
 }) {
+  const faixa = destaque === "bom" ? "var(--good)" : destaque === "ruim" ? "var(--critical)" : undefined;
   return (
     <div
-      className={`rounded-xl border border-line bg-surface p-4 ${destaque ? "col-span-2 lg:col-span-1" : ""}`}
-      style={destaque ? { boxShadow: "inset 0 3px 0 var(--series-2)" } : alerta ? { boxShadow: "inset 0 3px 0 var(--critical)" } : undefined}
+      className="rounded-xl border border-line bg-surface p-4"
+      style={faixa ? { boxShadow: `inset 0 3px 0 ${faixa}` } : undefined}
     >
       <div className="flex items-center gap-1.5 text-sm text-ink-2">
-        {alerta && (
+        {destaque === "ruim" && (
           <span aria-hidden className="text-critical-text">
             ●
           </span>
         )}
         {rotulo}
       </div>
-      <div className="num mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{valor}</div>
-      {nota && <div className={`mt-1 text-xs ${alerta ? "text-critical-text" : "text-muted"}`}>{nota}</div>}
+      <div className="num mt-1 text-xl font-semibold tracking-tight xl:text-2xl">{valor}</div>
+      {nota && (
+        <div className={`mt-1 text-xs ${destaque === "ruim" ? "text-critical-text" : "text-muted"}`}>{nota}</div>
+      )}
     </div>
   );
 }
@@ -432,7 +462,12 @@ function Cartao({
   );
 }
 
-function Legenda({ itens }: { itens: { rotulo: string; cor: string }[] }) {
+function Legenda() {
+  const itens = [
+    { rotulo: "Provisionado", cor: "var(--track)" },
+    { rotulo: "Gasto", cor: "var(--series-1)" },
+    { rotulo: "Acima do provisionado", cor: "var(--critical)" },
+  ];
   return (
     <div className="mb-3 flex flex-wrap gap-4 text-xs text-ink-2">
       {itens.map((i) => (
@@ -445,37 +480,88 @@ function Legenda({ itens }: { itens: { rotulo: string; cor: string }[] }) {
   );
 }
 
-type TooltipApi = ReturnType<typeof useTooltip>;
+/** Faixa = provisionado; barra = gasto até o provisionado; parte vermelha = o que passou. */
+function Bullet({ provisionado, gasto, max }: { provisionado: number; gasto: number; max: number }) {
+  const w = (v: number) => `${(v / max) * 100}%`;
+  const dentro = Math.min(gasto, provisionado || gasto);
+  const acima = provisionado ? Math.max(0, gasto - provisionado) : 0;
+  return (
+    <div className="relative h-4">
+      {provisionado > 0 && <div className="absolute inset-y-0 left-0 rounded-r-[4px]" style={{ width: w(provisionado), background: "var(--track)" }} />}
+      {dentro > 0 && (
+        <div
+          className="bar absolute top-1 bottom-1 left-0 rounded-r-[4px]"
+          style={{ width: `max(2px, ${w(dentro)})`, background: "var(--series-1)" }}
+        />
+      )}
+      {acima > 0 && (
+        <div
+          className="bar absolute top-1 bottom-1 rounded-r-[4px]"
+          style={{ left: `calc(${w(provisionado)} + 2px)`, width: `max(2px, calc(${w(acima)} - 2px))`, background: "var(--critical)" }}
+        />
+      )}
+      {provisionado > 0 && (
+        <div
+          aria-hidden
+          className="absolute -top-0.5 -bottom-0.5 w-[2px] rounded-full"
+          style={{ left: `calc(${w(provisionado)} - 1px)`, background: "var(--ink-2)" }}
+        />
+      )}
+    </div>
+  );
+}
 
-function BarrasPorImplantacao({
-  linhas,
-  tooltip,
-}: {
-  linhas: ReturnType<typeof resumir>;
-  tooltip: TooltipApi;
-}) {
-  const ordenadas = [...linhas].sort((a, b) => b.custo - a.custo);
-  const max = Math.max(1, ...ordenadas.map((r) => Math.max(r.custo, r.economia)));
+function Saldo({ r }: { r: ResumoImplantacao }) {
+  if (!r.provisionado) return <span className="text-muted">—</span>;
+  if (r.concluida) {
+    return r.economia >= 0 ? (
+      <span className="text-good-text">economia {brl(r.economia)}</span>
+    ) : (
+      <span className="text-critical-text">▲ estouro {brl(-r.economia)}</span>
+    );
+  }
+  return r.saldo >= 0 ? (
+    <span className="text-ink-2">disponível {brl(r.saldo)}</span>
+  ) : (
+    <span className="text-critical-text">▲ acima {brl(-r.saldo)}</span>
+  );
+}
+
+function textoSaldoCurto(r: ResumoImplantacao) {
+  if (!r.provisionado) return { t: "sem provisão", cls: "text-muted" };
+  if (r.concluida)
+    return r.economia >= 0
+      ? { t: `economia ${brlCurto(r.economia)}`, cls: "text-good-text" }
+      : { t: `estouro ${brlCurto(-r.economia)}`, cls: "text-critical-text" };
+  return r.saldo >= 0
+    ? { t: `disponível ${brlCurto(r.saldo)}`, cls: "text-muted" }
+    : { t: `acima ${brlCurto(-r.saldo)}`, cls: "text-critical-text" };
+}
+
+function BulletPorImplantacao({ linhas, tooltip }: { linhas: ResumoImplantacao[]; tooltip: TooltipApi }) {
+  const ordenadas = [...linhas].sort((a, b) => Math.max(b.provisionado, b.custo) - Math.max(a.provisionado, a.custo));
+  const max = Math.max(1, ...ordenadas.map((r) => Math.max(r.provisionado, r.custo)));
   if (!ordenadas.length) return <p className="py-6 text-center text-sm text-muted">Sem dados.</p>;
   return (
     <div className="space-y-1">
       {ordenadas.map((r) => {
+        const s = textoSaldoCurto(r);
         const linhasTip: TooltipLinha[] = [
-          { rotulo: "Custo", valor: brl(r.custo), cor: "var(--series-1)" },
-          { rotulo: "Economia", valor: brl(r.economia), cor: "var(--series-2)" },
-          { rotulo: "Orçado", valor: brl(r.imp.valorOrcado) },
-          ...(r.economia
+          { rotulo: "Provisionado", valor: brl(r.provisionado), cor: "var(--track)" },
+          { rotulo: "Gasto", valor: brl(r.custo), cor: "var(--series-1)" },
+          { rotulo: r.concluida ? "Economia" : "Saldo", valor: brl(r.concluida ? r.economia : r.saldo) },
+          ...(r.concluida && r.provisionado
             ? [
-                { rotulo: "  execução", valor: brl(r.econExecucao) },
                 { rotulo: "  negociação", valor: brl(r.econNegociacao) },
                 { rotulo: "  estoque", valor: brl(r.econEstoque) },
+                { rotulo: "  execução", valor: brl(r.econExecucao) },
               ]
             : []),
         ];
         return (
           <div
             key={r.imp.id}
-            className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-3 rounded-md px-1 py-1.5 hover:bg-hover sm:grid-cols-[minmax(0,15rem)_1fr]"
+            className="grid grid-cols-[minmax(0,8rem)_1fr] items-center gap-3 rounded-md px-1 py-1.5 hover:bg-hover sm:grid-cols-[minmax(0,14rem)_1fr_11.5rem]"
             onMouseMove={(e) => tooltip.mostrar(e, `${r.cliente} — ${r.imp.tipo}`, linhasTip)}
             onMouseLeave={tooltip.esconder}
           >
@@ -485,9 +571,13 @@ function BarrasPorImplantacao({
                 {r.imp.tipo} · {r.imp.status}
               </div>
             </div>
-            <div className="space-y-[2px]">
-              <Barra valor={r.custo} max={max} cor="var(--series-1)" rotulo={brlCurto(r.custo)} />
-              <Barra valor={r.economia} max={max} cor="var(--series-2)" rotulo={r.economia ? brlCurto(r.economia) : ""} />
+            <Bullet provisionado={r.provisionado} gasto={r.custo} max={max} />
+            <div className="num col-span-2 whitespace-nowrap text-right text-xs sm:col-span-1">
+              <div className="text-ink-2">
+                {brlCurto(r.custo)}
+                {r.provisionado ? <span className="text-muted"> de {brlCurto(r.provisionado)}</span> : null}
+              </div>
+              <div className={s.cls}>{s.t}</div>
             </div>
           </div>
         );
@@ -496,58 +586,90 @@ function BarrasPorImplantacao({
   );
 }
 
-function Barra({ valor, max, cor, rotulo }: { valor: number; max: number; cor: string; rotulo: string }) {
-  const w = valor > 0 ? Math.max(0.5, (valor / max) * 100) : 0;
+function BulletPorCategoria({
+  itens,
+  tooltip,
+}: {
+  itens: { rotulo: string; provisionado: number; gasto: number }[];
+  tooltip: TooltipApi;
+}) {
+  const max = Math.max(1, ...itens.map((i) => Math.max(i.provisionado, i.gasto)));
+  if (!itens.length) return <p className="py-6 text-center text-sm text-muted">Sem dados.</p>;
   return (
-    <div className="flex h-3 items-center gap-2">
-      <div className="relative h-full flex-1">
-        {w > 0 && <div className="bar h-full rounded-r-[4px]" style={{ width: `${w}%`, background: cor }} />}
-      </div>
-      <span className="num w-[4.75rem] shrink-0 whitespace-nowrap text-right text-xs text-ink-2">{rotulo}</span>
+    <div className="space-y-3">
+      {itens.map((i) => {
+        const saldo = i.provisionado - i.gasto;
+        return (
+          <div
+            key={i.rotulo}
+            className="rounded-md px-1 py-1 hover:bg-hover"
+            onMouseMove={(e) =>
+              tooltip.mostrar(e, i.rotulo, [
+                { rotulo: "Provisionado", valor: brl(i.provisionado), cor: "var(--track)" },
+                { rotulo: "Gasto", valor: brl(i.gasto), cor: "var(--series-1)" },
+                { rotulo: saldo >= 0 ? "Sobra" : "Acima", valor: brl(Math.abs(saldo)) },
+              ])
+            }
+            onMouseLeave={tooltip.esconder}
+          >
+            <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
+              <span>{i.rotulo}</span>
+              <span className="num text-ink-2">
+                {brl(i.gasto)}
+                <span className="text-xs text-muted"> de {brl(i.provisionado)}</span>
+              </span>
+            </div>
+            <Bullet provisionado={i.provisionado} gasto={i.gasto} max={max} />
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function BarrasSimples({
+function BarrasOrigem({
   itens,
-  cor,
   total,
   tooltip,
 }: {
   itens: { rotulo: string; valor: number; nota?: string }[];
-  cor: string;
   total: number;
   tooltip: TooltipApi;
 }) {
-  const max = Math.max(1, ...itens.map((i) => i.valor));
+  const max = Math.max(1, ...itens.map((i) => Math.abs(i.valor)));
   return (
     <div className="space-y-3">
-      {itens.map((i) => (
-        <div
-          key={i.rotulo}
-          className="rounded-md px-1 py-1 hover:bg-hover"
-          onMouseMove={(e) =>
-            tooltip.mostrar(e, i.rotulo, [
-              { rotulo: "Valor", valor: brl(i.valor), cor },
-              { rotulo: "Participação", valor: total ? pct(i.valor / total) : "—" },
-              ...(i.nota ? [{ rotulo: i.nota, valor: "" }] : []),
-            ])
-          }
-          onMouseLeave={tooltip.esconder}
-        >
-          <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
-            <span>{i.rotulo}</span>
-            <span className="num text-ink-2">
-              {brl(i.valor)} <span className="text-xs text-muted">· {total ? pct(i.valor / total) : "—"}</span>
-            </span>
+      {itens.map((i) => {
+        const neg = i.valor < 0;
+        const cor = neg ? "var(--critical)" : "var(--series-2)";
+        return (
+          <div
+            key={i.rotulo}
+            className="rounded-md px-1 py-1 hover:bg-hover"
+            onMouseMove={(e) =>
+              tooltip.mostrar(e, i.rotulo, [
+                { rotulo: "Valor", valor: brl(i.valor), cor },
+                { rotulo: "Da economia total", valor: total > 0 ? pct(i.valor / total) : "—" },
+                ...(i.nota ? [{ rotulo: i.nota, valor: "" }] : []),
+              ])
+            }
+            onMouseLeave={tooltip.esconder}
+          >
+            <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
+              <span className={neg ? "text-critical-text" : ""}>{i.rotulo}</span>
+              <span className={`num ${neg ? "text-critical-text" : "text-ink-2"}`}>{brl(i.valor)}</span>
+            </div>
+            <div className="h-2.5">
+              {i.valor !== 0 && (
+                <div
+                  className="bar h-full rounded-r-[4px]"
+                  style={{ width: `${Math.max(0.5, (Math.abs(i.valor) / max) * 100)}%`, background: cor }}
+                />
+              )}
+            </div>
           </div>
-          <div className="h-2.5 rounded-r-[4px] bg-transparent">
-            {i.valor > 0 && (
-              <div className="bar h-full rounded-r-[4px]" style={{ width: `${Math.max(0.5, (i.valor / max) * 100)}%`, background: cor }} />
-            )}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
