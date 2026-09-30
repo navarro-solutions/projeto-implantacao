@@ -68,7 +68,15 @@ npm run dev
 2. Cadastre as variáveis de ambiente acima.
 3. Deploy. Cada push na `main` publica de novo.
 
-Para restringir o acesso, ative **Settings → Deployment Protection** no projeto da Vercel.
+## Login
+
+O painel pede usuário e senha (`src/proxy.ts`). Cadastre na Vercel, em **Settings → Environment Variables**:
+
+- `PAINEL_USUARIO` — usuário de acesso
+- `PAINEL_SENHA` — senha de acesso (marque como *Sensitive*)
+
+Depois de mudar qualquer uma delas, faça **Redeploy** para valer. Sem as duas variáveis o site responde
+"Acesso bloqueado" — nunca fica aberto por engano. Rodando local (`npm run dev`) sem elas, o login é dispensado.
 
 ## Estrutura
 
