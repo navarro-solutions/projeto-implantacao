@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Implantações — Custo e Economia",
+  title: "Gotham · Implantações",
   description: "Painel de custo e economia por implantação (portaria remota, CFTV, controle de acesso e interfonia).",
 };
 

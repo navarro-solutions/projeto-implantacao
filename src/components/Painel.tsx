@@ -14,6 +14,9 @@ import {
   situacao,
   type ResumoImplantacao,
 } from "@/lib/calculos";
+import Image from "next/image";
+import capa from "../../public/gotham-capa.jpg";
+import wordmark from "../../public/gotham-wordmark.png";
 import { Tooltip, useTooltip, type TooltipLinha } from "./Tooltip";
 
 const TODOS = "__todos__";
@@ -96,13 +99,28 @@ export default function Painel({ base }: { base: BaseCarregada }) {
   const filtrosAtivos = [fTipo, fCliente, fStatus, fAno].some((f) => f !== TODOS);
 
   return (
+    <>
+      {/* Barra da marca */}
+      <div className="border-b border-line bg-page">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <Image src={wordmark} alt="Gotham" priority className="h-5 w-auto sm:h-6" />
+          <FonteDados base={base} />
+        </div>
+      </div>
+
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Implantações</h1>
+      <header className="flex items-center gap-4 sm:gap-6">
+        <Image
+          src={capa}
+          alt="Gotham"
+          priority
+          className="h-20 w-20 shrink-0 rounded-xl border border-line object-cover sm:h-28 sm:w-28"
+        />
+        <div className="min-w-0">
+          <p className="text-xs font-medium tracking-[0.25em] text-accent uppercase">Painel de</p>
+          <h1 className="text-2xl font-semibold tracking-[0.08em] uppercase sm:text-3xl">Implantações</h1>
           <p className="mt-1 text-sm text-ink-2">Quanto podia gastar, quanto gastou e quanto economizou</p>
         </div>
-        <FonteDados base={base} />
       </header>
 
       {base.fonte === "exemplo" && (
@@ -180,7 +198,7 @@ export default function Painel({ base }: { base: BaseCarregada }) {
       {/* Provisionado × gasto por implantação */}
       <Cartao
         titulo="Provisionado × gasto por implantação"
-        subtitulo="A faixa clara é o que podia gastar; a barra é o que gastou. Passe o mouse para ver o detalhe."
+        subtitulo="A faixa cinza é o que podia gastar; a barra amarela é o que gastou. Passe o mouse para ver o detalhe."
         className="mt-4"
       >
         <Legenda />
@@ -334,6 +352,7 @@ export default function Painel({ base }: { base: BaseCarregada }) {
 
       <Tooltip estado={tooltip.estado} />
     </main>
+    </>
   );
 }
 
@@ -392,7 +411,7 @@ function Filtro({
       <select
         value={valor}
         onChange={(e) => set(e.target.value)}
-        className="max-w-[12rem] cursor-pointer bg-transparent font-medium text-ink outline-none"
+        className="max-w-[12rem] cursor-pointer bg-surface font-medium text-ink outline-none"
       >
         <option value={TODOS}>Todos</option>
         {opcoes.map((o) => (
@@ -454,7 +473,7 @@ function Cartao({
   return (
     <section className={`rounded-xl border border-line bg-surface ${className}`}>
       <div className={semPadding ? "px-4 pt-4 pb-3" : "px-4 pt-4"}>
-        <h2 className="text-base font-semibold">{titulo}</h2>
+        <h2 className="text-sm font-semibold tracking-[0.06em] uppercase">{titulo}</h2>
         {subtitulo && <p className="mt-0.5 text-xs text-muted">{subtitulo}</p>}
       </div>
       <div className={semPadding ? "" : "p-4 pt-3"}>{children}</div>
